@@ -19,6 +19,10 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function displayValue(value) {
+  return value || '未填写';
+}
+
 async function request(path, options={}){
   const token=localStorage.getItem('candidate_token'); const headers=options.headers||{};
   if(!(options.body instanceof FormData)) headers['Content-Type']='application/json';
@@ -46,11 +50,11 @@ function Jobs({user,onNeedLogin}){
   }
   useEffect(()=>{load()},[]);
   async function apply(id){ if(!user){onNeedLogin();return} try{await request(`/candidate/jobs/${id}/apply`,{method:'POST'}); setMsg('投递成功')}catch(e){setMsg(e.message)} }
-  return <section className="panel"><h2>公开岗位列表</h2><div className="search"><input placeholder="搜索岗位/地点" value={kw} onChange={e=>setKw(e.target.value)}/><button onClick={load}>搜索</button></div>{msg&&<div className="notice">{msg}</div>}<div className="jobs">{jobs.map(j=><div className="job" key={j.id}><h3>{j.title}</h3><p>{j.location} · {j.salary||'薪资面议'}</p><p>{j.description}</p><details><summary>岗位要求</summary>{j.requirements}</details><button onClick={()=>apply(j.id)}>一键投递</button></div>)}</div></section>
+  return <section className="panel"><h2>公开岗位列表</h2><div className="search"><input placeholder="搜索岗位/地点" value={kw} onChange={e=>setKw(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')load()}}/><button onClick={load}>搜索</button></div>{msg&&<div className="notice">{msg}</div>}<div className="jobs">{jobs.map(j=><div className="job" key={j.id}><h3>{j.title}</h3><p>{j.location} · {j.salary||'薪资面议'}</p><p>{j.description}</p><details><summary>岗位要求</summary>{j.requirements}</details><button onClick={()=>apply(j.id)}>一键投递</button></div>)}</div></section>
 }
 
 function Profile(){
-  const [p,setP]=useState(EMPTY_PROFILE); const [msg,setMsg]=useState('');
+  const [p,setP]=useState(EMPTY_PROFILE); const [msg,setMsg]=useState(''); const [editing,setEditing]=useState(false);
   async function load(){
     try {
       const data = await request('/candidate/profile');
@@ -61,9 +65,10 @@ function Profile(){
     }
   }
   useEffect(()=>{load()},[]);
-  async function save(){try{const data=await request('/candidate/profile',{method:'PUT',body:JSON.stringify(p)}); setP(data); setMsg('资料已保存')}catch(e){setMsg(e.message)}}
+  async function save(){try{const data=await request('/candidate/profile',{method:'PUT',body:JSON.stringify(p)}); setP(data); setMsg('资料已保存'); setEditing(false)}catch(e){setMsg(e.message)}}
   async function upload(e){const file=e.target.files[0]; if(!file)return; setMsg('正在获取签名URL...'); try{const sign=await request('/candidate/resume/sign-upload',{method:'POST',body:JSON.stringify({filename:file.name,contentType:file.type,size:file.size})}); setMsg('正在直传私有OSS...'); const put=await fetch(sign.uploadUrl,{method:'PUT',body:file}); if(!put.ok) throw new Error('OSS 上传失败，请检查 Bucket CORS 与签名配置'); const data=await request('/candidate/resume/confirm',{method:'POST',body:JSON.stringify({objectKey:sign.objectKey,filename:file.name})}); setP(data); setMsg('简历已上传到私有 OSS，并记录 objectKey');}catch(e){setMsg(e.message)}}
-  return <section className="panel"><h2>结构化个人档案</h2><div className="grid"><input placeholder="姓名" value={p.name||''} onChange={e=>setP({...p,name:e.target.value})}/><input placeholder="电话" value={p.phone||''} onChange={e=>setP({...p,phone:e.target.value})}/><input placeholder="邮箱" value={p.email||''} onChange={e=>setP({...p,email:e.target.value})}/><input placeholder="最高学历" value={p.education||''} onChange={e=>setP({...p,education:e.target.value})}/><input placeholder="毕业院校" value={p.school||''} onChange={e=>setP({...p,school:e.target.value})}/><input placeholder="核心技能标签" value={p.skills||''} onChange={e=>setP({...p,skills:e.target.value})}/><textarea placeholder="工作/项目经历" value={p.experience||''} onChange={e=>setP({...p,experience:e.target.value})}/></div><div className="actions"><button onClick={save}>保存资料</button><label className="upload">上传PDF/DOC/DOCX简历<input type="file" accept=".pdf,.doc,.docx" onChange={upload}/></label></div>{p.resumeFileName&&<p>已上传简历：{p.resumeFileName}</p>}{msg&&<div className="notice">{msg}</div>}</section>
+  if(!editing) return <section className="panel"><div className="panel-title"><h2>结构化个人档案</h2><button onClick={()=>setEditing(true)}>修改个人资料</button></div><div className="profile-view"><div><span>姓名</span><b>{displayValue(p.name)}</b></div><div><span>电话</span><b>{displayValue(p.phone)}</b></div><div><span>邮箱</span><b>{displayValue(p.email)}</b></div><div><span>最高学历</span><b>{displayValue(p.education)}</b></div><div><span>毕业院校</span><b>{displayValue(p.school)}</b></div><div><span>核心技能标签</span><b>{displayValue(p.skills)}</b></div><div className="wide"><span>工作/项目经历</span><b>{displayValue(p.experience)}</b></div><div className="wide"><span>简历</span><b>{p.resumeFileName||'未上传'}</b></div></div>{msg&&<div className="notice">{msg}</div>}</section>
+  return <section className="panel"><div className="panel-title"><h2>结构化个人档案</h2><button className="link" onClick={()=>setEditing(false)}>取消修改</button></div><div className="grid"><input placeholder="姓名" value={p.name||''} onChange={e=>setP({...p,name:e.target.value})}/><input placeholder="电话" value={p.phone||''} onChange={e=>setP({...p,phone:e.target.value})}/><input placeholder="邮箱" value={p.email||''} onChange={e=>setP({...p,email:e.target.value})}/><input placeholder="最高学历" value={p.education||''} onChange={e=>setP({...p,education:e.target.value})}/><input placeholder="毕业院校" value={p.school||''} onChange={e=>setP({...p,school:e.target.value})}/><input placeholder="核心技能标签" value={p.skills||''} onChange={e=>setP({...p,skills:e.target.value})}/><textarea placeholder="工作/项目经历" value={p.experience||''} onChange={e=>setP({...p,experience:e.target.value})}/></div><div className="actions"><button onClick={save}>保存资料</button><label className="upload">上传PDF/DOC/DOCX简历<input type="file" accept=".pdf,.doc,.docx" onChange={upload}/></label></div>{p.resumeFileName&&<p>已上传简历：{p.resumeFileName}</p>}{msg&&<div className="notice">{msg}</div>}</section>
 }
 
 function MyApplications(){const [apps,setApps]=useState([]);useEffect(()=>{request('/candidate/applications').then(data=>setApps(asArray(data))).catch(()=>setApps([]))},[]);return <section className="panel"><h2>我的投递</h2><table><thead><tr><th>岗位</th><th>状态</th><th>时间</th></tr></thead><tbody>{apps.map(a=><tr key={a.id}><td>{a.jobTitle}</td><td>{a.status}</td><td>{new Date(a.createdAt).toLocaleString()}</td></tr>)}</tbody></table></section>}
