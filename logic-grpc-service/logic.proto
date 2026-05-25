@@ -1,0 +1,19 @@
+syntax = "proto3";
+package hr;
+
+// 课程作业为了突出“Web 服务通过 gRPC 远程调用 Logic 服务”，实现中采用 JSON codec 的统一 Call 方法。
+service LogicService {
+  rpc Call (Request) returns (Response);
+}
+
+message Request {
+  string operation = 1;
+  map<string, string> meta = 2;
+  bytes body = 3;
+}
+
+message Response {
+  int32 code = 1;
+  string message = 2;
+  bytes data = 3;
+}

@@ -1,0 +1,12 @@
+.env
+.DS_Store
+node_modules/
+dist/
+coverage/
+*.log
+*.exe
+*.test
+vendor/
+private_storage/
+.idea/
+.vscode/
