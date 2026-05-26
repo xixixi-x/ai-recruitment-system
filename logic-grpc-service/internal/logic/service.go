@@ -319,11 +319,12 @@ func (s *Service) candidateResumeSignUpload(req *rpc.Request) (*rpc.Response, er
 		return rpc.Fail(400, "简历文件不能超过 10MB"), nil
 	}
 	key := ossstore.BuildObjectKey(uid, body.Filename)
-	url, err := s.oss.SignedPutURL(key)
+	contentType := ossstore.ResumeContentType(body.Filename)
+	url, err := s.oss.SignedPutURL(key, contentType)
 	if err != nil {
 		return rpc.Fail(500, err.Error()), nil
 	}
-	return rpc.OK(map[string]any{"uploadUrl": url, "objectKey": key}), nil
+	return rpc.OK(map[string]any{"uploadUrl": url, "objectKey": key, "contentType": contentType}), nil
 }
 
 func (s *Service) candidateResumeConfirm(req *rpc.Request) (*rpc.Response, error) {
