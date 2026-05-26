@@ -4,6 +4,7 @@ import './style.css';
 
 const API = import.meta.env.VITE_API_BASE || 'http://localhost:8080/api';
 const EMPTY_PROFILE = {name: '', phone: '', email: '', education: '', school: '', experience: '', skills: ''};
+const EDUCATION_OPTIONS = ['初中', '高中', '专科', '本科', '研究生', '博士生'];
 
 function readStoredUser(key) {
   try {
@@ -20,6 +21,13 @@ function asArray(value) {
 
 function displayValue(value) {
   return value || '未填写';
+}
+
+function validateProfile(profile) {
+  if (!/^\d{11}$/.test(profile.phone || '')) return '电话必须是 11 位数字';
+  if (!/^[^\s@]+@[^\s@]+\.com$/.test(profile.email || '')) return '邮箱格式必须类似 xx@xx.com';
+  if (!EDUCATION_OPTIONS.includes(profile.education || '')) return '最高学历必须从可选项中选择';
+  return '';
 }
 
 async function request(path, options = {}) {
@@ -168,6 +176,12 @@ function Profile() {
   }, []);
 
   async function save() {
+    const validationMessage = validateProfile(p);
+    if (validationMessage) {
+      setMsg(validationMessage);
+      return;
+    }
+
     try {
       const data = await request('/candidate/profile', {method: 'PUT', body: JSON.stringify(p)});
       setP(data);
@@ -187,9 +201,13 @@ function Profile() {
         method: 'POST',
         body: JSON.stringify({filename: file.name, contentType: file.type, size: file.size}),
       });
+      const contentType = sign.contentType || file.type || 'application/octet-stream';
       setMsg('正在上传简历...');
-      const put = await fetch(sign.uploadUrl, {method: 'PUT', body: file});
-      if (!put.ok) throw new Error('OSS 上传失败，请检查 Bucket CORS 与签名配置');
+      const put = await fetch(sign.uploadUrl, {method: 'PUT', headers: {'Content-Type': contentType}, body: file});
+      if (!put.ok) {
+        const detail = await put.text().catch(() => '');
+        throw new Error(`OSS 上传失败（HTTP ${put.status}）：${detail || '请检查 Bucket CORS、签名 Content-Type 与权限配置'}`);
+      }
       const data = await request('/candidate/resume/confirm', {
         method: 'POST',
         body: JSON.stringify({objectKey: sign.objectKey, filename: file.name}),
@@ -237,9 +255,16 @@ function Profile() {
       </div>
       <div className="form-grid">
         <input placeholder="姓名" value={p.name || ''} onChange={e => setP({...p, name: e.target.value})} />
-        <input placeholder="电话" value={p.phone || ''} onChange={e => setP({...p, phone: e.target.value})} />
-        <input placeholder="邮箱" value={p.email || ''} onChange={e => setP({...p, email: e.target.value})} />
-        <input placeholder="最高学历" value={p.education || ''} onChange={e => setP({...p, education: e.target.value})} />
+        <input
+          placeholder="电话，11 位数字"
+          value={p.phone || ''}
+          onChange={e => setP({...p, phone: e.target.value.replace(/\D/g, '').slice(0, 11)})}
+        />
+        <input placeholder="邮箱，xx@xx.com" value={p.email || ''} onChange={e => setP({...p, email: e.target.value})} />
+        <select value={p.education || ''} onChange={e => setP({...p, education: e.target.value})}>
+          <option value="">请选择最高学历</option>
+          {EDUCATION_OPTIONS.map(item => <option key={item} value={item}>{item}</option>)}
+        </select>
         <input placeholder="毕业院校" value={p.school || ''} onChange={e => setP({...p, school: e.target.value})} />
         <input placeholder="核心技能标签" value={p.skills || ''} onChange={e => setP({...p, skills: e.target.value})} />
         <textarea placeholder="工作 / 项目经历" value={p.experience || ''} onChange={e => setP({...p, experience: e.target.value})} />

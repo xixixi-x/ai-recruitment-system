@@ -3,6 +3,7 @@ package ossstore
 import (
 	"errors"
 	"fmt"
+	"mime"
 	"path/filepath"
 	"strings"
 	"time"
@@ -43,14 +44,54 @@ func ValidateResumeFile(filename string) error {
 	}
 }
 
+func ResumeContentType(filename string) string {
+	ext := strings.ToLower(filepath.Ext(filename))
+	switch ext {
+	case ".pdf":
+		return "application/pdf"
+	case ".doc":
+		return "application/msword"
+	case ".docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	default:
+		if typ := mime.TypeByExtension(ext); typ != "" {
+			return typ
+		}
+		return "application/octet-stream"
+	}
+}
+
+func safeObjectName(filename string) string {
+	base := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range base {
+		isSafe := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '.'
+		if isSafe {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	name := strings.Trim(b.String(), "._-")
+	if name == "" {
+		return "resume"
+	}
+	return name
+}
+
 func BuildObjectKey(candidateID uint, filename string) string {
 	ext := strings.ToLower(filepath.Ext(filename))
-	clean := strings.ReplaceAll(strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename)), " ", "_")
+	clean := safeObjectName(filename)
 	return fmt.Sprintf("resumes/candidate_%d/%d_%s%s", candidateID, time.Now().UnixNano(), clean, ext)
 }
 
-func (s *Store) SignedPutURL(objectKey string) (string, error) {
-	return s.bucket.SignURL(objectKey, oss.HTTPPut, s.expire)
+func (s *Store) SignedPutURL(objectKey, contentType string) (string, error) {
+	return s.bucket.SignURL(objectKey, oss.HTTPPut, s.expire, oss.ContentType(contentType))
 }
 
 func (s *Store) SignedGetURL(objectKey string) (string, error) {

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -20,6 +22,35 @@ type Service struct {
 	db  *gorm.DB
 	oss *ossstore.Store
 	ai  *ai.Assistant
+}
+
+type skillMention struct {
+	Name  string
+	Count int
+}
+
+var skillAliases = []struct {
+	Name    string
+	Aliases []string
+}{
+	{Name: "MySQL", Aliases: []string{"mysql"}},
+	{Name: "Go", Aliases: []string{"go", "golang"}},
+	{Name: "Java", Aliases: []string{"java"}},
+	{Name: "Python", Aliases: []string{"python"}},
+	{Name: "JavaScript", Aliases: []string{"javascript", "js"}},
+	{Name: "TypeScript", Aliases: []string{"typescript", "ts"}},
+	{Name: "React", Aliases: []string{"react"}},
+	{Name: "Vue", Aliases: []string{"vue"}},
+	{Name: "Redis", Aliases: []string{"redis"}},
+	{Name: "Docker", Aliases: []string{"docker"}},
+	{Name: "Kubernetes", Aliases: []string{"kubernetes", "k8s"}},
+	{Name: "Linux", Aliases: []string{"linux"}},
+	{Name: "微服务", Aliases: []string{"微服务"}},
+	{Name: "gRPC", Aliases: []string{"grpc"}},
+	{Name: "Gin", Aliases: []string{"gin"}},
+	{Name: "算法", Aliases: []string{"算法"}},
+	{Name: "机器学习", Aliases: []string{"机器学习", "machine learning"}},
+	{Name: "大模型", Aliases: []string{"大模型", "llm"}},
 }
 
 func New(db *gorm.DB, oss *ossstore.Store, assistant *ai.Assistant) *Service {
@@ -319,11 +350,12 @@ func (s *Service) candidateResumeSignUpload(req *rpc.Request) (*rpc.Response, er
 		return rpc.Fail(400, "简历文件不能超过 10MB"), nil
 	}
 	key := ossstore.BuildObjectKey(uid, body.Filename)
-	url, err := s.oss.SignedPutURL(key)
+	contentType := ossstore.ResumeContentType(body.Filename)
+	url, err := s.oss.SignedPutURL(key, contentType)
 	if err != nil {
 		return rpc.Fail(500, err.Error()), nil
 	}
-	return rpc.OK(map[string]any{"uploadUrl": url, "objectKey": key}), nil
+	return rpc.OK(map[string]any{"uploadUrl": url, "objectKey": key, "contentType": contentType}), nil
 }
 
 func (s *Service) candidateResumeConfirm(req *rpc.Request) (*rpc.Response, error) {
@@ -396,6 +428,141 @@ func (s *Service) candidateMyApplications(req *rpc.Request) (*rpc.Response, erro
 	return rpc.OK(rows), nil
 }
 
+func aliasRanges(text, alias string) [][2]int {
+	if strings.IndexFunc(alias, func(r rune) bool {
+		return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+	}) == -1 {
+		var ranges [][2]int
+		offset := 0
+		for {
+			idx := strings.Index(text[offset:], alias)
+			if idx == -1 {
+				break
+			}
+			start := offset + idx
+			end := start + len(alias)
+			ranges = append(ranges, [2]int{start, end})
+			offset = end
+		}
+		return ranges
+	}
+	pattern := regexp.MustCompile(`(^|[^a-z0-9])` + regexp.QuoteMeta(alias) + `([^a-z0-9]|$)`)
+	matches := pattern.FindAllStringSubmatchIndex(text, -1)
+	ranges := make([][2]int, 0, len(matches))
+	for _, match := range matches {
+		start := match[0]
+		end := match[1]
+		for start < end && ((text[start] < 'a' || text[start] > 'z') && (text[start] < '0' || text[start] > '9')) {
+			start++
+		}
+		for end > start && ((text[end-1] < 'a' || text[end-1] > 'z') && (text[end-1] < '0' || text[end-1] > '9')) {
+			end--
+		}
+		ranges = append(ranges, [2]int{start, end})
+	}
+	return ranges
+}
+
+func countAliases(text string, aliases []string) int {
+	sortedAliases := append([]string(nil), aliases...)
+	sort.Slice(sortedAliases, func(i, j int) bool {
+		return len(sortedAliases[i]) > len(sortedAliases[j])
+	})
+	used := make([]bool, len(text))
+	total := 0
+	for _, alias := range sortedAliases {
+		for _, r := range aliasRanges(text, strings.ToLower(alias)) {
+			overlap := false
+			for i := r[0]; i < r[1]; i++ {
+				if used[i] {
+					overlap = true
+					break
+				}
+			}
+			if overlap {
+				continue
+			}
+			for i := r[0]; i < r[1]; i++ {
+				used[i] = true
+			}
+			total++
+		}
+	}
+	return total
+}
+
+func rankSkillMentions(jobs []model.Job) []skillMention {
+	counts := make([]skillMention, 0, len(skillAliases))
+	for _, skill := range skillAliases {
+		total := 0
+		for _, job := range jobs {
+			text := strings.ToLower(job.Title + "\n" + job.Description + "\n" + job.Requirements)
+			total += countAliases(text, skill.Aliases)
+		}
+		if total > 0 {
+			counts = append(counts, skillMention{Name: skill.Name, Count: total})
+		}
+	}
+	sort.Slice(counts, func(i, j int) bool {
+		if counts[i].Count == counts[j].Count {
+			return counts[i].Name < counts[j].Name
+		}
+		return counts[i].Count > counts[j].Count
+	})
+	return counts
+}
+
+func educationRank(education string) int {
+	switch strings.TrimSpace(education) {
+	case "博士", "博士生", "博士研究生":
+		return 6
+	case "硕士", "硕士生", "研究生", "硕士研究生":
+		return 5
+	case "本科", "学士":
+		return 4
+	case "专科", "大专":
+		return 3
+	case "高中":
+		return 2
+	case "初中":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func highestEducationInApplications(apps []model.ApplicationView) (string, []model.ApplicationView) {
+	highestRank := 0
+	highest := ""
+	var people []model.ApplicationView
+	for _, app := range apps {
+		level := strings.TrimSpace(app.Education)
+		rank := educationRank(level)
+		if level == "" || rank == 0 {
+			continue
+		}
+		if rank > highestRank {
+			highestRank = rank
+			highest = level
+			people = []model.ApplicationView{app}
+			continue
+		}
+		if rank == highestRank {
+			people = append(people, app)
+		}
+	}
+	return highest, people
+}
+
+func truncateText(s string, max int) string {
+	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+	if len([]rune(s)) <= max {
+		return s
+	}
+	r := []rune(s)
+	return string(r[:max]) + "..."
+}
+
 func (s *Service) hrBusinessContext(hrID uint) string {
 	var totalJobs int64
 	var totalApps int64
@@ -415,6 +582,87 @@ func (s *Service) hrBusinessContext(hrID uint) string {
 	}
 	if len(rows) == 0 {
 		lines = append(lines, "- 暂无岗位数据")
+	}
+
+	var jobs []model.Job
+	s.db.Where("hr_id = ?", hrID).Order("created_at desc").Limit(100).Find(&jobs)
+
+	var apps []model.ApplicationView
+	s.applicationQueryForHR(hrID).Order("applications.created_at desc").Limit(200).Scan(&apps)
+
+	lines = append(lines, "", "岗位要求技能提及频次:")
+	skills := rankSkillMentions(jobs)
+	if len(skills) == 0 {
+		lines = append(lines, "- 暂无可识别技能关键词")
+	} else {
+		for i, skill := range skills {
+			if i >= 10 {
+				break
+			}
+			lines = append(lines, fmt.Sprintf("- %s: %d 次", skill.Name, skill.Count))
+		}
+	}
+
+	educationCounts := map[string]int{}
+	for _, app := range apps {
+		if edu := strings.TrimSpace(app.Education); edu != "" {
+			educationCounts[edu]++
+		}
+	}
+	highestEducation, highestPeople := highestEducationInApplications(apps)
+	lines = append(lines, "", "投递候选人学历分布:")
+	if len(educationCounts) == 0 {
+		lines = append(lines, "- 暂无候选人学历数据")
+	} else {
+		educations := make([]string, 0, len(educationCounts))
+		for edu := range educationCounts {
+			educations = append(educations, edu)
+		}
+		sort.Slice(educations, func(i, j int) bool {
+			ri, rj := educationRank(educations[i]), educationRank(educations[j])
+			if ri == rj {
+				return educations[i] < educations[j]
+			}
+			return ri > rj
+		})
+		for _, edu := range educations {
+			lines = append(lines, fmt.Sprintf("- %s: %d 人", edu, educationCounts[edu]))
+		}
+		lines = append(lines, fmt.Sprintf("- 当前最高学历: %s", highestEducation))
+		for _, person := range highestPeople {
+			name := person.CandidateName
+			if name == "" {
+				name = "未填写姓名"
+			}
+			lines = append(lines, fmt.Sprintf("  - %s，应聘 %s", name, person.JobTitle))
+		}
+	}
+
+	lines = append(lines, "", "岗位明细:")
+	if len(jobs) == 0 {
+		lines = append(lines, "- 暂无岗位明细")
+	} else {
+		for _, job := range jobs {
+			lines = append(lines, fmt.Sprintf("- 岗位: %s | 地点: %s | 薪资: %s | 状态: %s", job.Title, job.Location, job.Salary, job.Status))
+			lines = append(lines, fmt.Sprintf("  描述: %s", truncateText(job.Description, 180)))
+			lines = append(lines, fmt.Sprintf("  要求: %s", truncateText(job.Requirements, 260)))
+		}
+	}
+
+	lines = append(lines, "", "投递与候选人档案明细:")
+	if len(apps) == 0 {
+		lines = append(lines, "- 暂无投递明细")
+	} else {
+		for _, app := range apps {
+			name := app.CandidateName
+			if name == "" {
+				name = "未填写姓名"
+			}
+			lines = append(lines, fmt.Sprintf("- 候选人: %s | 应聘岗位: %s | 学历: %s | 学校: %s | 状态: %s | 投递时间: %s", name, app.JobTitle, app.Education, app.School, app.Status, app.CreatedAt.Format("2006-01-02 15:04")))
+			lines = append(lines, fmt.Sprintf("  技能: %s", truncateText(app.Skills, 180)))
+			lines = append(lines, fmt.Sprintf("  经历: %s", truncateText(app.Experience, 240)))
+			lines = append(lines, fmt.Sprintf("  简历文件: %s", app.ResumeFileName))
+		}
 	}
 	return strings.Join(lines, "\n")
 }
