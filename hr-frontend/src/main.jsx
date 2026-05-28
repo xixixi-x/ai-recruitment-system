@@ -17,6 +17,25 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+const JOB_TEMPLATE_COLUMNS = ['岗位名称', '薪资范围', '工作地点', '岗位描述', '岗位要求'];
+
+function csvEscape(value) {
+  const text = String(value ?? '');
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function downloadTextFile(filename, content) {
+  const blob = new Blob(['\uFEFF' + content], {type: 'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 async function request(path, options = {}) {
   const token = localStorage.getItem('hr_token');
   const headers = options.headers || {};
@@ -140,6 +159,15 @@ function JobPanel() {
     }
   }
 
+  function downloadJobTemplate() {
+    const rows = [
+      JOB_TEMPLATE_COLUMNS,
+      ['Go 后端开发工程师', '15k-25k', '北京', '负责招聘系统后端业务开发与接口维护', '熟悉 Go、Gin、MySQL，有 gRPC 项目经验'],
+    ];
+    const csv = rows.map(row => row.map(csvEscape).join(',')).join('\r\n');
+    downloadTextFile('岗位批量导入模板.csv', csv);
+  }
+
   return (
     <section className="panel">
       <div className="section-head">
@@ -149,6 +177,7 @@ function JobPanel() {
         </div>
         <div className="section-actions">
           <span className="count">{jobs.length} 个岗位</span>
+          <button className="ghost-button" onClick={downloadJobTemplate}>下载模板</button>
           <button className="ghost-button" onClick={() => setCreating(v => !v)}>{creating ? '收起发布' : '新建岗位'}</button>
         </div>
       </div>
