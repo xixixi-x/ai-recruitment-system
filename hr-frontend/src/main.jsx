@@ -52,20 +52,52 @@ function Auth({onLogin}) {
 
   return (
     <main className="auth-page">
-      <section className="auth-card">
+      <section className="auth-copy">
         <p className="eyebrow">HR Workspace</p>
         <h1>智能招聘管理台</h1>
-        <p className="muted">发布岗位、查看投递，并用 AI 快速梳理招聘进展。</p>
+        <p>集中管理岗位、候选人投递和 AI 招聘问答，让招聘流程保持清晰、有序、可追踪。</p>
+        <div className="auth-metrics">
+          <span>岗位发布</span>
+          <span>投递筛选</span>
+          <span>AI 分析</span>
+        </div>
+        <div className="auth-preview">
+          <div>
+            <span>01</span>
+            <b>发布岗位</b>
+            <p>录入职责、地点、薪资和技能要求。</p>
+          </div>
+          <div>
+            <span>02</span>
+            <b>查看投递</b>
+            <p>集中比较候选人资料、简历和联系方式。</p>
+          </div>
+          <div>
+            <span>03</span>
+            <b>AI 辅助</b>
+            <p>快速询问岗位热度和候选人分布。</p>
+          </div>
+        </div>
+      </section>
+      <section className="auth-card">
+        <p className="eyebrow">{mode === 'login' ? 'Sign in' : 'Create account'}</p>
+        <h2>{mode === 'login' ? 'HR 登录' : '注册 HR 账号'}</h2>
         <form onSubmit={submit}>
-          <input placeholder="HR 账号" value={form.username} onChange={e => setForm({...form, username: e.target.value})} />
-          <input
-            type="password"
-            placeholder="密码至少 6 位"
-            value={form.password}
-            onChange={e => setForm({...form, password: e.target.value})}
-          />
+          <label>
+            <span>账号</span>
+            <input placeholder="请输入 HR 账号" value={form.username} onChange={e => setForm({...form, username: e.target.value})} />
+          </label>
+          <label>
+            <span>密码</span>
+            <input
+              type="password"
+              placeholder="密码至少 6 位"
+              value={form.password}
+              onChange={e => setForm({...form, password: e.target.value})}
+            />
+          </label>
           {err && <div className="error">{err}</div>}
-          <button>{mode === 'login' ? '登录' : '注册并登录'}</button>
+          <button>{mode === 'login' ? '登录工作台' : '注册并进入'}</button>
         </form>
         <button className="text-button" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
           {mode === 'login' ? '没有账号？注册 HR' : '已有账号？返回登录'}
@@ -79,6 +111,7 @@ function JobPanel() {
   const [jobs, setJobs] = useState([]);
   const [form, setForm] = useState({title: '', description: '', requirements: '', salary: '', location: ''});
   const [msg, setMsg] = useState('');
+  const [creating, setCreating] = useState(false);
 
   async function load() {
     try {
@@ -100,6 +133,7 @@ function JobPanel() {
       await request('/hr/jobs', {method: 'POST', body: JSON.stringify(form)});
       setForm({title: '', description: '', requirements: '', salary: '', location: ''});
       setMsg('岗位已发布');
+      setCreating(false);
       load();
     } catch (e) {
       setMsg(e.message);
@@ -113,25 +147,34 @@ function JobPanel() {
           <p className="eyebrow">Jobs</p>
           <h2>岗位管理</h2>
         </div>
-        <span className="count">{jobs.length} 个岗位</span>
+        <div className="section-actions">
+          <span className="count">{jobs.length} 个岗位</span>
+          <button className="ghost-button" onClick={() => setCreating(v => !v)}>{creating ? '收起发布' : '新建岗位'}</button>
+        </div>
       </div>
-      <form className="form-grid" onSubmit={createJob}>
-        <input placeholder="岗位名称" value={form.title} onChange={e => setForm({...form, title: e.target.value})} />
-        <input placeholder="薪资范围" value={form.salary} onChange={e => setForm({...form, salary: e.target.value})} />
-        <input placeholder="工作地点" value={form.location} onChange={e => setForm({...form, location: e.target.value})} />
-        <textarea placeholder="岗位描述" value={form.description} onChange={e => setForm({...form, description: e.target.value})} />
-        <textarea placeholder="岗位要求" value={form.requirements} onChange={e => setForm({...form, requirements: e.target.value})} />
-        <button className="form-submit">发布岗位</button>
-      </form>
+      {creating && (
+        <form className="form-grid create-job" onSubmit={createJob}>
+          <input placeholder="岗位名称" value={form.title} onChange={e => setForm({...form, title: e.target.value})} />
+          <input placeholder="薪资范围" value={form.salary} onChange={e => setForm({...form, salary: e.target.value})} />
+          <input placeholder="工作地点" value={form.location} onChange={e => setForm({...form, location: e.target.value})} />
+          <textarea placeholder="岗位描述" value={form.description} onChange={e => setForm({...form, description: e.target.value})} />
+          <textarea placeholder="岗位技能要求" value={form.requirements} onChange={e => setForm({...form, requirements: e.target.value})} />
+          <button className="form-submit">发布岗位</button>
+        </form>
+      )}
       {msg && <div className="notice">{msg}</div>}
       <div className="job-list">
         {jobs.map(job => (
           <article className="job-card" key={job.id}>
             <div>
               <h3>{job.title}</h3>
-              <p className="muted">{job.location || '地点待定'} · {job.salary || '薪资面议'}</p>
+              <p className="meta">{job.location || '地点待定'} · {job.salary || '薪资面议'}</p>
             </div>
             <p>{job.description || '暂无岗位描述'}</p>
+            <details className="job-requirements">
+              <summary>岗位技能要求</summary>
+              <div>{job.requirements || '暂无技能要求'}</div>
+            </details>
           </article>
         ))}
       </div>
@@ -181,8 +224,9 @@ function ApplicationPanel() {
             <tr>
               <th>岗位</th>
               <th>候选人</th>
-              <th>联系方式</th>
-              <th>学历 / 学校</th>
+              <th>电话</th>
+              <th>邮箱</th>
+              <th>学校 / 学历</th>
               <th>技能</th>
               <th>简历</th>
             </tr>
@@ -192,9 +236,10 @@ function ApplicationPanel() {
               <tr key={app.id}>
                 <td>{app.jobTitle}</td>
                 <td>{app.candidateName || '未填写'}</td>
-                <td>{app.phone}<br />{app.email}</td>
-                <td>{app.education}<br />{app.school}</td>
-                <td>{app.skills}</td>
+                <td>{app.phone || '未填写'}</td>
+                <td>{app.email || '未填写'}</td>
+                <td>{app.school || '未填写'} / {app.education || '未填写'}</td>
+                <td>{app.skills || '未填写'}</td>
                 <td><button className="ghost-button" onClick={() => openResume(app.id)}>下载</button></td>
               </tr>
             ))}
@@ -265,12 +310,12 @@ function ChatPanel() {
 
 function App() {
   const [user, setUser] = useState(() => readStoredUser('hr_user'));
-  const overview = useMemo(() => ['岗位发布', '投递管理', 'AI 分析'], []);
+  const overview = useMemo(() => ['岗位发布', '投递管理', '简历下载', 'AI 分析'], []);
 
   if (!user) return <Auth onLogin={setUser} />;
 
   return (
-    <div>
+    <div className="app-shell">
       <header className="topbar">
         <div>
           <p className="eyebrow">Recruitment System</p>
@@ -284,6 +329,7 @@ function App() {
       <main className="page">
         <section className="hero">
           <div>
+            <p className="eyebrow">Overview</p>
             <h2>把招聘流程收拢到一个清晰界面</h2>
             <p>发布岗位、筛选候选人、查看简历和提问 AI 都保持在同一套节奏里。</p>
           </div>

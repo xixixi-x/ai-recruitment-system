@@ -42,7 +42,7 @@ async function request(path, options = {}) {
   return json.data;
 }
 
-function Login({onLogin}) {
+function Auth({onLogin}) {
   const [mode, setMode] = useState('login');
   const [form, setForm] = useState({username: '', password: ''});
   const [err, setErr] = useState('');
@@ -64,28 +64,63 @@ function Login({onLogin}) {
   }
 
   return (
-    <section className="auth">
-      <p className="eyebrow">Candidate Access</p>
-      <h2>候选人登录</h2>
-      <form onSubmit={submit}>
-        <input placeholder="账号" value={form.username} onChange={e => setForm({...form, username: e.target.value})} />
-        <input
-          type="password"
-          placeholder="密码"
-          value={form.password}
-          onChange={e => setForm({...form, password: e.target.value})}
-        />
-        {err && <div className="error">{err}</div>}
-        <button>{mode === 'login' ? '登录' : '注册并登录'}</button>
-      </form>
-      <button className="text-button" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
-        {mode === 'login' ? '注册候选人账号' : '已有账号，返回登录'}
-      </button>
-    </section>
+    <main className="auth-page">
+      <section className="auth-copy">
+        <p className="eyebrow">Candidate Center</p>
+        <h1>清楚管理求职资料与投递进度</h1>
+        <p>维护档案、上传简历、浏览岗位，并持续跟进每一次申请。</p>
+        <div className="auth-metrics">
+          <span>岗位检索</span>
+          <span>档案维护</span>
+          <span>投递记录</span>
+        </div>
+        <div className="auth-preview">
+          <div>
+            <span>01</span>
+            <b>完善档案</b>
+            <p>补充学历、学校、项目经历和核心技能。</p>
+          </div>
+          <div>
+            <span>02</span>
+            <b>上传简历</b>
+            <p>将 PDF/DOC/DOCX 简历安全保存到对象存储。</p>
+          </div>
+          <div>
+            <span>03</span>
+            <b>跟进投递</b>
+            <p>统一查看岗位申请状态和投递时间。</p>
+          </div>
+        </div>
+      </section>
+      <section className="auth-card">
+        <p className="eyebrow">{mode === 'login' ? 'Sign in' : 'Create account'}</p>
+        <h2>{mode === 'login' ? '候选人登录' : '注册候选人账号'}</h2>
+        <form onSubmit={submit}>
+          <label>
+            <span>账号</span>
+            <input placeholder="请输入账号" value={form.username} onChange={e => setForm({...form, username: e.target.value})} />
+          </label>
+          <label>
+            <span>密码</span>
+            <input
+              type="password"
+              placeholder="请输入密码"
+              value={form.password}
+              onChange={e => setForm({...form, password: e.target.value})}
+            />
+          </label>
+          {err && <div className="error">{err}</div>}
+          <button>{mode === 'login' ? '进入候选人中心' : '注册并进入'}</button>
+        </form>
+        <button className="text-button" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
+          {mode === 'login' ? '注册候选人账号' : '已有账号？返回登录'}
+        </button>
+      </section>
+    </main>
   );
 }
 
-function Jobs({user, onNeedLogin}) {
+function Jobs({user}) {
   const [jobs, setJobs] = useState([]);
   const [kw, setKw] = useState('');
   const [msg, setMsg] = useState('');
@@ -105,10 +140,6 @@ function Jobs({user, onNeedLogin}) {
   }, []);
 
   async function apply(id) {
-    if (!user) {
-      onNeedLogin();
-      return;
-    }
     try {
       await request(`/candidate/jobs/${id}/apply`, {method: 'POST'});
       setMsg('投递成功');
@@ -148,7 +179,7 @@ function Jobs({user, onNeedLogin}) {
               <summary>岗位要求</summary>
               <div>{job.requirements || '暂无详细要求'}</div>
             </details>
-            <button onClick={() => apply(job.id)}>一键投递</button>
+            <button onClick={() => apply(job.id)} disabled={!user}>一键投递</button>
           </article>
         ))}
       </div>
@@ -195,25 +226,16 @@ function Profile() {
   async function upload(e) {
     const file = e.target.files[0];
     if (!file) return;
-    setMsg('正在获取签名 URL...');
+    setMsg('正在上传简历...');
     try {
-      const sign = await request('/candidate/resume/sign-upload', {
+      const form = new FormData();
+      form.append('resume', file);
+      const data = await request('/candidate/resume/upload', {
         method: 'POST',
-        body: JSON.stringify({filename: file.name, contentType: file.type, size: file.size}),
-      });
-      const contentType = sign.contentType || file.type || 'application/octet-stream';
-      setMsg('正在上传简历...');
-      const put = await fetch(sign.uploadUrl, {method: 'PUT', headers: {'Content-Type': contentType}, body: file});
-      if (!put.ok) {
-        const detail = await put.text().catch(() => '');
-        throw new Error(`OSS 上传失败（HTTP ${put.status}）：${detail || '请检查 Bucket CORS、签名 Content-Type 与权限配置'}`);
-      }
-      const data = await request('/candidate/resume/confirm', {
-        method: 'POST',
-        body: JSON.stringify({objectKey: sign.objectKey, filename: file.name}),
+        body: form,
       });
       setP(data);
-      setMsg('简历已上传并记录');
+      setMsg('简历已上传到 OSS 并记录');
     } catch (e) {
       setMsg(e.message);
     }
@@ -322,31 +344,59 @@ function MyApplications() {
   );
 }
 
+function Overview({profile, applicationCount}) {
+  const completed = profile?.name && profile?.phone && profile?.email && profile?.education && profile?.school && profile?.skills;
+  return (
+    <section className="overview-grid">
+      <div>
+        <span>档案状态</span>
+        <b>{completed ? '信息完整' : '待完善'}</b>
+      </div>
+      <div>
+        <span>简历文件</span>
+        <b>{profile?.resumeFileName ? '已上传' : '未上传'}</b>
+      </div>
+      <div>
+        <span>投递记录</span>
+        <b>{applicationCount} 条</b>
+      </div>
+    </section>
+  );
+}
+
 function App() {
   const [user, setUser] = useState(() => readStoredUser('candidate_user'));
-  const [showLogin, setShowLogin] = useState(false);
+  const [profileSummary, setProfileSummary] = useState(EMPTY_PROFILE);
+  const [applicationCount, setApplicationCount] = useState(0);
+
+  useEffect(() => {
+    if (!user) return;
+    request('/candidate/profile')
+      .then(data => setProfileSummary(data && typeof data === 'object' ? data : EMPTY_PROFILE))
+      .catch(() => setProfileSummary(EMPTY_PROFILE));
+    request('/candidate/applications')
+      .then(data => setApplicationCount(asArray(data).length))
+      .catch(() => setApplicationCount(0));
+  }, [user]);
+
+  if (!user) return <Auth onLogin={setUser} />;
 
   return (
-    <div>
+    <div className="app-shell">
       <header className="topbar">
         <div>
           <p className="eyebrow">Recruitment System</p>
           <h1>候选人中心</h1>
         </div>
         <div className="user-area">
-          {user ? (
-            <>
-              <span>{user.username}</span>
-              <button className="ghost-button" onClick={() => { localStorage.clear(); setUser(null); }}>退出</button>
-            </>
-          ) : (
-            <button onClick={() => setShowLogin(true)}>登录 / 注册</button>
-          )}
+          <span>{user.username}</span>
+          <button className="ghost-button" onClick={() => { localStorage.clear(); setUser(null); }}>退出</button>
         </div>
       </header>
       <main className="page">
         <section className="hero">
           <div>
+            <p className="eyebrow">Overview</p>
             <h2>清楚管理求职资料与投递进度</h2>
             <p>浏览岗位、维护档案、上传简历，并持续跟进每一次申请。</p>
           </div>
@@ -356,14 +406,10 @@ function App() {
             <span>投递记录</span>
           </div>
         </section>
-        {showLogin && !user && <Login onLogin={u => { setUser(u); setShowLogin(false); }} />}
-        <Jobs user={user} onNeedLogin={() => setShowLogin(true)} />
-        {user && (
-          <>
-            <Profile />
-            <MyApplications />
-          </>
-        )}
+        <Overview profile={profileSummary} applicationCount={applicationCount} />
+        <Profile />
+        <Jobs user={user} />
+        <MyApplications />
       </main>
     </div>
   );

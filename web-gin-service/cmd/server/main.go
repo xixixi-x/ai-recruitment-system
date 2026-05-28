@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -58,6 +60,7 @@ func main() {
 	cand.GET("/profile", s.forward("candidate.getProfile"))
 	cand.PUT("/profile", s.forward("candidate.saveProfile"))
 	cand.POST("/resume/sign-upload", s.forward("candidate.resumeSignUpload"))
+	cand.POST("/resume/upload", s.candidateResumeUpload)
 	cand.POST("/resume/confirm", s.forward("candidate.resumeConfirm"))
 	cand.POST("/jobs/:id/apply", s.candidateApply)
 	cand.GET("/applications", s.forward("candidate.myApplications"))
@@ -179,4 +182,73 @@ func (s *Server) candidateApply(c *gin.Context) {
 		return
 	}
 	s.ok(c, resp)
+}
+
+func (s *Server) candidateResumeUpload(c *gin.Context) {
+	const maxResumeSize = 10 * 1024 * 1024
+
+	file, header, err := c.Request.FormFile("resume")
+	if err != nil {
+		s.fail(c, 400, "请选择要上传的简历文件")
+		return
+	}
+	defer file.Close()
+
+	if header.Size > maxResumeSize {
+		s.fail(c, 400, "简历文件不能超过 10MB")
+		return
+	}
+
+	signResp, err := s.cli.Call(c.Request.Context(), "candidate.resumeSignUpload", middleware.Meta(c), gin.H{
+		"filename":    header.Filename,
+		"contentType": header.Header.Get("Content-Type"),
+		"size":        header.Size,
+	})
+	if err != nil {
+		s.fail(c, 400, err.Error())
+		return
+	}
+
+	var sign struct {
+		UploadURL   string `json:"uploadUrl"`
+		ObjectKey   string `json:"objectKey"`
+		ContentType string `json:"contentType"`
+	}
+	if err := json.Unmarshal(signResp.Data, &sign); err != nil {
+		s.fail(c, 500, "签名响应解析失败")
+		return
+	}
+	if sign.ContentType == "" {
+		sign.ContentType = "application/octet-stream"
+	}
+
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPut, sign.UploadURL, file)
+	if err != nil {
+		s.fail(c, 500, err.Error())
+		return
+	}
+	req.Header.Set("Content-Type", sign.ContentType)
+	req.ContentLength = header.Size
+
+	ossResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		s.fail(c, 502, fmt.Sprintf("OSS 上传失败：%v", err))
+		return
+	}
+	defer ossResp.Body.Close()
+	if ossResp.StatusCode < 200 || ossResp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(ossResp.Body, 2048))
+		s.fail(c, 502, fmt.Sprintf("OSS 上传失败（HTTP %d）：%s", ossResp.StatusCode, strings.TrimSpace(string(body))))
+		return
+	}
+
+	confirmResp, err := s.cli.Call(c.Request.Context(), "candidate.resumeConfirm", middleware.Meta(c), gin.H{
+		"objectKey": sign.ObjectKey,
+		"filename":  header.Filename,
+	})
+	if err != nil {
+		s.fail(c, 400, err.Error())
+		return
+	}
+	s.ok(c, confirmResp)
 }
